@@ -1,40 +1,77 @@
-# import numpy as np
-# import matplotlib.pyplot as plt
-# from starspot.rotation_tools import filter_sigma_clip, sigma_clip
+import numpy as np
+import matplotlib.pyplot as plt
+from starspot.rotation_tools import filter_sigma_clip, sigma_clip
 
 
-# def test_sigma_clip():
-#     np.random.seed(42)
-#     N, Nout = 1000, 20
-#     t0 = np.linspace(0, 100, N)
-#     p = 10
-#     w = 2*np.pi/p
-#     y0 = np.sin(w*t0) + np.random.randn(N)*.1
-#     inds = np.random.choice(np.arange(len(y0)), Nout)
-#     y0[inds] += np.random.randn(Nout)*10.
+def test_sigma_clip():
+    """Test the sigma_clip function for outlier detection."""
+    np.random.seed(42)
+    N, Nout = 1000, 20
+    t0 = np.linspace(0, 100, N)
+    p = 10
+    w = 2*np.pi/p
+    y0 = np.sin(w*t0) + np.random.randn(N)*.1
 
-#     # Initial removal of extreme outliers.
-#     m = sigma_clip(y0, nsigma=7)
-#     t, y = t0[m], y0[m]
+    # Add some outliers
+    inds = np.random.choice(np.arange(len(y0)), Nout)
+    y0[inds] += np.random.randn(Nout)*10.
 
-#     # Sigma clip
-#     smooth, mask = filter_sigma_clip(t, y, polyorder=2)
-#     resids = y - smooth
+    # Initial removal of extreme outliers
+    m = sigma_clip(y0, nsigma=7)
 
-#     # Plot results
-#     plt.figure(figsize=(16, 9))
-#     plt.subplot(2, 1, 1)
-#     plt.plot(t0, y0, ".", label="Original")
-#     plt.plot(t, y, ".", label="initial clip")
-#     plt.plot(t, smooth, label="smoothed")
-#     plt.legend()
+    # Check that the mask has the right shape
+    assert len(m) == N
 
-#     plt.subplot(2, 1, 2)
-#     plt.plot(t, resids, ".", label="Whole lc")
-#     plt.plot(t[~mask], resids[~mask], ".", label="Detected outliers")
-#     plt.legend()
-#     plt.savefig("test.png")
+    # Check that the mask is mostly True (most points kept)
+    assert np.sum(m) >= N - Nout
+
+    # Check that the outliers were removed
+    t, y = t0[m], y0[m]
+    assert len(t) < N  # Some points should be removed
+    assert np.std(y) < np.std(y0)  # Standard deviation should be smaller after clipping
+
+    # The standard deviation after clipping will be higher than the noise level
+    # because we still have the sine wave component
+    assert 0.1 < np.std(y) < 1.0
 
 
-# if __name__ == "__main__":
-#     test_sigma_clip()
+def test_filter_sigma_clip():
+    """Test the filter_sigma_clip function for smoothing and outlier detection."""
+    np.random.seed(42)
+    N, Nout = 1000, 20
+    t0 = np.linspace(0, 100, N)
+    p = 10
+    w = 2*np.pi/p
+    y0 = np.sin(w*t0) + np.random.randn(N)*.1
+
+    # Add some outliers
+    inds = np.random.choice(np.arange(len(y0)), Nout)
+    y0[inds] += np.random.randn(Nout)*10.
+
+    # Initial removal of extreme outliers
+    m = sigma_clip(y0, nsigma=7)
+    t, y = t0[m], y0[m]
+
+    # Apply filter_sigma_clip
+    smooth, mask = filter_sigma_clip(t, y, nsigma=3, window_length=49, polyorder=2)
+
+    # Check that the smooth array has the right shape
+    assert len(smooth) == len(t)
+
+    # Check that the mask has the right shape
+    assert len(mask) == len(t)
+
+    # Calculate residuals
+    resids = y - smooth
+
+    # Check that the residuals of non-outlier points are small
+    assert np.std(resids[mask]) < 0.2
+
+    # Check that the residuals of outlier points are large
+    if np.sum(~mask) > 0:  # If there are any outliers detected
+        assert np.std(resids[~mask]) > 0.2
+
+
+if __name__ == "__main__":
+    test_sigma_clip()
+    test_filter_sigma_clip()

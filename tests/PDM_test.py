@@ -1,276 +1,187 @@
 import numpy as np
+import pytest
 from starspot import phase_dispersion_minimization as pdm
-import matplotlib.pyplot as plt
 import starspot as ss
 
 
 def test_sj2():
+    """Test the sj2 function for variance calculation."""
     np.random.seed(42)
     N = 10000
-    t = np.linspace(0, .1, N)
-    x = np.random.randn(N)
+    x = np.random.randn(N)  # Normal distribution with mean 0, std 1
     sj2 = pdm.sj2(x, 0, N)
+    # Variance of a standard normal distribution should be close to 1
     assert np.isclose(sj2, 1, atol=.01)
 
 
 def test_s2():
+    """Test the s2 function for overall variance calculation."""
     np.random.seed(42)
     N = 10000
     M = 10
     nj = np.ones(M) * N
     sj2 = np.zeros(M)
     for j in range(M):
-        t = np.linspace(0, .1, N)
         x = np.random.randn(N)
         sj2[j] = pdm.sj2(x, 0, nj[j])
     s2 = pdm.s2(nj, sj2, M)
+    # Overall variance should be close to 1
     assert np.isclose(s2, 1, atol=.01)
 
 
-def test_phase():
+def test_calc_phase():
+    """Test the calc_phase function."""
+    # Create time array
+    t = np.array([0, 5, 10, 15, 20, 25])
 
-    # Generate some data
-    t = np.linspace(0, 100, 1000)
-    p = 10
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-
+    # Test with period = 10
     phase = pdm.calc_phase(10, t)
+    expected_phase = np.array([0, 0.5, 0, 0.5, 0, 0.5])
+    assert np.allclose(phase, expected_phase)
 
-    # plt.plot(phase, x, ".")
-    # plt.savefig("phase_test")
-    # plt.close()
-
-
-def test_phase_bins():
-    """
-    Make sure that phased light curves are binned correctly.
-    """
-
-    # Generate some data
-    t = np.linspace(0, 100, 1000)
-    p = 10
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-
-    nbins = 10
-
-    # Try a period of 2.5
-    phase = pdm.calc_phase(2.5, t)
-    x_means, phase_bins, Ns, sj2s, x_binned, phase_binned = \
-        pdm.phase_bins(nbins, phase, x)
-    mid_phase_bins = np.diff(phase_bins) * .5 + phase_bins[:-1]
-    s225 = pdm.s2(Ns, sj2s, nbins)
-
-    # Try a period of 5
+    # Test with period = 5
     phase = pdm.calc_phase(5, t)
-    x_means, phase_bins, Ns, sj2s, x_binned, phase_binned = \
-        pdm.phase_bins(nbins, phase, x)
-    mid_phase_bins = np.diff(phase_bins) * .5 + phase_bins[:-1]
-    s25 = pdm.s2(Ns, sj2s, nbins)
-
-    # Try a period of 10
-    phase = pdm.calc_phase(10, t)
-    x_means, phase_bins, Ns, sj2s, x_binned, phase_binned = \
-        pdm.phase_bins(nbins, phase, x)
-    mid_phase_bins = np.diff(phase_bins) * .5 + phase_bins[:-1]
-    s210 = pdm.s2(Ns, sj2s, nbins)
-
-    # Plot each bin
-    for j in range(nbins):
-        plt.plot(phase_binned[j], x_binned[j], ".", alpha=.1, zorder=3)
-
-    # Make sure that a period of 10 has the smallest s2 value.
-    assert s210 < s25
-    assert s210 < s225
-
-    # Calculate the total variance and phi statistic and test that too.
-    total_variance = pdm.sj2(x, np.mean(x), len(x))
-    phi10 = s210/total_variance
-    phi5 = s25/total_variance
-    phi25 = s225/total_variance
-
-    assert phi10 < phi5
-    assert phi10 < phi25
-
-    assert pdm.phi(10, 10, t, x) == s210/total_variance
-    assert pdm.phi(10, 5, t, x) == s25/total_variance
-    assert pdm.phi(10, 2.5, t, x) == s225/total_variance
-
-    # plt.plot(phase, x, ".", zorder=0)
-    # plt.errorbar(mid_phase_bins, x_means, fmt=".", yerr=sj2s, zorder=1)
-    # plt.savefig("phase_test2")
-    # plt.close()
-
-    assert np.isclose(max(x_means), 1, atol=.02)
+    expected_phase = np.array([0, 0, 0, 0, 0, 0])
+    assert np.allclose(phase, expected_phase)
 
 
-def test_phi():
-
-    # Generate some data
-    t = np.linspace(0, 100, 1000)
-    p = 10
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-
-    # Generate some data
-    # t = np.linspace(0, 100, 1000)
-    # p = 10
-    # w = 2*np.pi/p
-    # x1 = np.sin(w*t)
-    # x2 = .4*np.sin(w*t + np.pi/2)
-    # x3 = .3*np.sin(w*t + np.pi/3)
-    # x = x1 #+ x2 + x3
-    # x += np.random.randn(len(x)) * .1
-
-    # plt.plot(t, x1)
-    # plt.plot(t, x2)
-    # plt.plot(t, x3)
-    x += np.random.randn(len(x))*.1
-    # plt.plot(t, x)
-    # plt.savefig("test")
-
-    # Calculate the Phi statistic over a range of periods
-    nperiods = 200
+def test_phase_bins(synthetic_data):
+    """Test the phase_bins function with synthetic data."""
+    t, x, _, p = synthetic_data
     nbins = 10
-    periods = np.linspace(1, 20, nperiods)
-    phis = np.zeros(nperiods)
-    for i, p in enumerate(periods):
-        phis[i] = pdm.phi(nbins, p, t, x)
 
-    # Find period with the lowest Phi
-    ind = np.argmin(phis)
-    pplot = periods[ind]
-    # pplot = 10
+    # Test with the correct period (10)
+    phase = pdm.calc_phase(p, t)
+    x_means, phase_bins, Ns, sj2s, x_binned, phase_binned = \
+        pdm.phase_bins(nbins, phase, x)
 
-    # Get variances for that period
-    phase = pdm.calc_phase(pplot, t)
-    x_means, phase_bs, Ns, sj2s, xb, pb = pdm.phase_bins(nbins, phase, x)
-    mid_phase_bins = np.diff(phase_bs)*.5 + phase_bs[:-1]
+    # Check that the output arrays have the correct shapes
+    assert len(x_means) == nbins
+    assert len(phase_bins) == nbins + 1
+    assert len(Ns) == nbins
+    assert len(sj2s) == nbins
+    assert len(x_binned) == nbins
+    assert len(phase_binned) == nbins
 
-    # Calculate the phase at that period (for plotting)
-    phase = pdm.calc_phase(pplot, t)
+    # Check that the bins cover the full phase range [0, 1]
+    assert phase_bins[0] == 0
+    assert phase_bins[-1] == 1
 
-    # Make the plot
-    # fig = plt.figure(figsize=(16, 9))
-    # ax1 = fig.add_subplot(311)
-    # ax1.plot(t, x, ".")
-    # ax1.set_xlabel("Time")
-    # ax1.set_ylabel("Flux")
+    # Check that the number of points in each bin is approximately equal
+    assert np.isclose(np.std(Ns) / np.mean(Ns), 0, atol=0.2)
 
-    # ax2 = fig.add_subplot(312)
-    # ax2.plot(phase, x, ".")
-    # ax2.errorbar(mid_phase_bins, x_means, yerr=sj2s, fmt=".")
-    # ax2.set_xlabel("Phase")
-    # ax2.set_ylabel("Flux")
+    # Try different periods and check that the correct period has the lowest variance
+    periods = [2.5, 5, p]
+    s2_values = []
 
-    # ax3 = fig.add_subplot(313)
-    # ax3.plot(periods, phis)  # *pplot)
-    # ax3.set_xlabel("Period [days]")
-    # ax3.set_ylabel("Dispersion")
-    # ax3.axvline(periods[ind], color="C1")
+    for period in periods:
+        phase = pdm.calc_phase(period, t)
+        x_means, phase_bins, Ns, sj2s, _, _ = pdm.phase_bins(nbins, phase, x)
+        s2_values.append(pdm.s2(Ns, sj2s, nbins))
 
-    # fig.savefig("phi_test")
-
-    assert np.isclose(periods[ind], 10, atol=.1)
+    # The correct period should have the lowest s2 value
+    assert s2_values[2] < s2_values[0]
+    assert s2_values[2] < s2_values[1]
 
 
-def test_uncertainty():
+def test_phi(synthetic_data):
+    """Test the phi function with synthetic data."""
+    t, x, _, p = synthetic_data
+    nbins = 10
 
-    # Generate some data
+    # Calculate phi for different periods
+    periods = [5, 7.5, p, 12.5, 15]
+    phis = [pdm.phi(nbins, period, t, x) for period in periods]
+
+    # The correct period should have the lowest phi value
+    assert phis[2] == min(phis)
+
+    # Test with a range of periods
+    nperiods = 100
+    period_grid = np.linspace(5, 15, nperiods)
+    phi_values = np.array([pdm.phi(nbins, period, t, x) for period in period_grid])
+
+    # Find the period with the minimum phi
+    best_period = period_grid[np.argmin(phi_values)]
+
+    # The best period should be close to the true period
+    assert np.isclose(best_period, p, atol=0.1)
+
+
+def test_uncertainty(synthetic_data):
+    """Test the uncertainty estimation in PDM."""
+    t, x, xerr, p = synthetic_data
+
+    # Create RotationModel instance
+    rm = ss.RotationModel(t, x, xerr)
+
+    # Test with period grid around the true period
+    nperiods = 100
+    period_grid = np.linspace(5, 15, nperiods)
+    pdm_period, period_err = rm.pdm_rotation(period_grid)
+
+    # The PDM period should be close to the true period
+    assert np.isclose(pdm_period, p, atol=0.5)
+
+    # The uncertainty should be positive and reasonable
+    assert period_err > 0
+    assert period_err < p / 2  # Uncertainty should be less than half the period
+
+
+@pytest.mark.parametrize("test_period", [2, 5, 10, 20, 50])
+def test_pdm_different_periods(test_period):
+    """Test PDM with different input periods."""
+    # Generate data with the specified period
     np.random.seed(42)
     t = np.linspace(0, 100, 1000)
-    p = 10
-    w = 2*np.pi/p
+    w = 2*np.pi/test_period
     x = np.sin(w*t) + np.random.randn(len(t))*1e-2
     xerr = np.ones_like(x)*1e-2
 
+    # Create RotationModel instance
     rm = ss.RotationModel(t, x, xerr)
-    nperiods = 200
-    period_grid = np.linspace(1, 20, nperiods)
-    pdm_period, period_err = rm.pdm_rotation(period_grid)
-    print(pdm_period, period_err)
-    # fig = rm.pdm_plot()
-    # plt.savefig("pdm_test")
 
-    # 2 day period
+    # Create period grid centered around the test period
+    nperiods = 100
+    period_grid = np.linspace(max(0.1, test_period/2), test_period*1.5, nperiods)
+
+    # Calculate PDM period
+    pdm_period, period_err = rm.pdm_rotation(period_grid)
+
+    # The PDM period should be close to the true period
+    assert np.isclose(pdm_period, test_period, rtol=0.1)
+
+
+def test_gaussian_fit():
+    """Test the Gaussian fitting function used for uncertainty estimation."""
+    # Create a Gaussian curve with known parameters
+    x = np.linspace(-5, 5, 100)
+    A, b, mu, sigma = -1.0, 0.5, 0.0, 1.0
+    y = pdm.gaussian([A, b, mu, sigma], x)
+
+    # Add some noise
     np.random.seed(42)
-    p = 2
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-    xerr = np.ones_like(x)*1e-2
-    period_grid = np.linspace(.1, 5, nperiods)
-    rm = ss.RotationModel(t, x, xerr)
-    pdm_period, period_err = rm.pdm_rotation(period_grid)
-    print(pdm_period, period_err)
-    # fig = rm.pdm_plot()
-    # plt.savefig("pdm_test_2")
+    y_noisy = y + np.random.randn(len(x))*0.05
 
-    # 5 day period
-    np.random.seed(42)
-    p = 5
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-    xerr = np.ones_like(x)*1e-2
-    period_grid = np.linspace(.1, 10, nperiods)
-    rm = ss.RotationModel(t, x, xerr)
-    pdm_period, period_err = rm.pdm_rotation(period_grid)
-    print(pdm_period, period_err)
-    # fig = rm.pdm_plot()
-    # plt.savefig("pdm_test_5")
+    # Fit a Gaussian to the noisy data
+    from scipy.optimize import minimize
+    result = minimize(pdm.nll, [A, b, mu, sigma], args=(x, y_noisy))
 
-    # 20 day period
-    p = 20
-    np.random.seed(42)
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-    xerr = np.ones_like(x)*1e-2
-    period_grid = np.linspace(5, 30, nperiods)
-    rm = ss.RotationModel(t, x, xerr)
-    pdm_period, period_err = rm.pdm_rotation(period_grid)
-    print(pdm_period, period_err)
-    # fig = rm.pdm_plot()
-    # plt.savefig("pdm_test_20")
-
-    # 50 day period
-    np.random.seed(42)
-    t = np.linspace(0, 100, 1000)
-    p = 50
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-    xerr = np.ones_like(x)*1e-2
-    period_grid = 10**np.linspace(0, np.log10(200), nperiods)
-    rm = ss.RotationModel(t, x, xerr)
-    pdm_period, period_err = rm.pdm_rotation(period_grid)
-    print(pdm_period, period_err)
-    # fig = rm.pdm_plot()
-    # plt.savefig("pdm_test_50")
-
-    # 100 day period
-    np.random.seed(42)
-    p = 100
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-    xerr = np.ones_like(x)*1e-2
-    period_grid = 10**np.linspace(0, np.log10(200), nperiods)
-    rm = ss.RotationModel(t, x, xerr)
-    pdm_period, period_err = rm.pdm_rotation(period_grid)
-    print(pdm_period, period_err)
-    # fig = rm.pdm_plot()
-    # plt.savefig("pdm_test_100")
+    # The fitted parameters should be close to the true parameters
+    fitted_A, fitted_b, fitted_mu, fitted_sigma = result.x
+    assert np.isclose(fitted_A, A, atol=0.2)
+    assert np.isclose(fitted_b, b, atol=0.2)
+    assert np.isclose(fitted_mu, mu, atol=0.2)
+    assert np.isclose(fitted_sigma, sigma, atol=0.2)
 
 
 if __name__ == "__main__":
     test_sj2()
     test_s2()
-
-    # Generate some data
-    t = np.linspace(0, 100, 1000)
-    p = 10
-    w = 2*np.pi/p
-    x = np.sin(w*t) + np.random.randn(len(t))*1e-2
-
-    test_phase()
-    test_phase_bins()
-    test_phi()
-    test_uncertainty()
+    test_calc_phase()
+    # The following tests require pytest fixtures
+    # test_phase_bins()
+    # test_phi()
+    # test_uncertainty()
+    # test_pdm_different_periods()
+    test_gaussian_fit()

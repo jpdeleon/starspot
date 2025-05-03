@@ -2,7 +2,6 @@
 A set of functions for measuring rotation periods and plotting the results.
 """
 
-
 import os
 import numpy as np
 import glob
