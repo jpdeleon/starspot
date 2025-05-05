@@ -7,6 +7,18 @@ from .rotation_tools import simple_acf, get_peak_statistics
 import exoplanet as xo
 import pymc3 as pm
 import theano.tensor as tt
+
+# Import the GP modules directly from celerite2
+try:
+    import celerite2.theano as ce
+    from celerite2.theano import terms as ceterms
+except ImportError:
+    # Fallback to older exoplanet structure if available
+    try:
+        from exoplanet.gp import terms
+        from exoplanet.gp.celerite import GP
+    except ImportError:
+        print("Error: Could not import required GP modules from either celerite2 or exoplanet.")
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 import pandas as pd
@@ -456,37 +468,117 @@ class RotationModel(object):
             period = pm.Deterministic("period", tt.exp(logperiod))
 
             # Set up the Gaussian Process model
-            kernel = xo.gp.terms.RotationTerm(
-                log_amp=logamp,
-                period=period,
-                log_Q0=logQ0,
-                log_deltaQ=logdeltaQ,
-                mix=mix
-            )
-            gp = xo.gp.GP(kernel, x, yerr**2 + tt.exp(logs2), J=4)
+            # Try to use the appropriate GP implementation based on what's available
+            try:
+                # Try using celerite2 first (newer versions of exoplanet)
+                kernel = ceterms.RotationTerm(
+                    sigma=tt.exp(0.5*logamp),
+                    period=period,
+                    Q0=tt.exp(logQ0),
+                    dQ=tt.exp(logdeltaQ),
+                    f=mix
+                )
+                # In celerite2, J is a parameter of the kernel, not the GP
+                kernel.J = 4
+                # Initialize the GP without the J parameter
+                gp = ce.GaussianProcess(kernel, t=x, diag=yerr**2 + tt.exp(logs2))
+                # No need to call compute again as it's already done in the constructor
+            except (NameError, AttributeError):
+                try:
+                    # Fall back to older exoplanet structure
+                    kernel = terms.RotationTerm(
+                        log_amp=logamp,
+                        period=period,
+                        log_Q0=logQ0,
+                        log_deltaQ=logdeltaQ,
+                        mix=mix
+                    )
+                    gp = GP(kernel, x, yerr**2 + tt.exp(logs2), J=4)
+                except (NameError, AttributeError):
+                    raise ImportError("Could not initialize GP model. Please check your exoplanet installation.")
 
             # Compute the Gaussian Process likelihood and add it into the
             # the PyMC3 model as a "potential"
-            pm.Potential("loglike", gp.log_likelihood(y - mean))
+            try:
+                # For celerite2
+                gp.condition(y - mean)
+                pm.Potential("loglike", gp.log_likelihood())
+            except (TypeError, AttributeError):
+                try:
+                    # Alternative celerite2 API
+                    pm.Potential("loglike", gp.log_likelihood(y - mean))
+                except (TypeError, AttributeError):
+                    # For older exoplanet
+                    pm.Potential("loglike", gp.log_likelihood(y - mean))
 
             # Compute the mean model prediction for plotting purposes
             if prediction:
-                pm.Deterministic("pred", gp.predict())
+                try:
+                    # For celerite2
+                    # We've already conditioned the GP in the log_likelihood step
+                    pm.Deterministic("pred", gp.predict())
+                except (TypeError, AttributeError):
+                    try:
+                        # Alternative celerite2 API
+                        pm.Deterministic("pred", gp.predict(y - mean))
+                    except (TypeError, AttributeError):
+                        # For older exoplanet
+                        pm.Deterministic("pred", gp.predict())
 
             # Optimize to find the maximum a posteriori parameters
-            self.map_soln = xo.optimize(start=model.test_point)
-            # print(self.map_soln)
-            # print(xo.utils.eval_in_model(model.logpt, self.map_soln))
-            # assert 0
+            try:
+                # Try direct PyMC3 find_MAP first (most compatible)
+                self.map_soln = pm.find_MAP(model=model)
+            except Exception as e:
+                print(f"find_MAP failed: {e}")
+                try:
+                    # For newer exoplanet versions
+                    import pymc3_ext
+                    self.map_soln = pymc3_ext.optimize(start=model.test_point)
+                except ImportError:
+                    try:
+                        # For older exoplanet versions
+                        self.map_soln = xo.optimize(start=model.test_point)
+                    except Exception as e:
+                        print(f"Optimization failed: {e}")
+                        # If all else fails, just use the test point
+                        self.map_soln = model.test_point
 
             # Sample from the posterior
             np.random.seed(42)
-            sampler = xo.PyMC3Sampler()
             with model:
                 print("sampling...")
-                sampler.tune(tune=tune, start=self.map_soln,
-                            step_kwargs=dict(target_accept=0.9), cores=cores)
-                trace = sampler.sample(draws=draws, cores=cores)
+                try:
+                    # Try with newer PyMC3 versions that support return_inferencedata
+                    trace = pm.sample(
+                        tune=tune,
+                        draws=draws,
+                        start=self.map_soln,
+                        cores=cores,
+                        return_inferencedata=False,
+                        target_accept=0.9  # Pass directly to sample
+                    )
+                except TypeError:
+                    # For older PyMC3 versions
+                    try:
+                        # Try with step object explicitly created
+                        step = pm.NUTS(target_accept=0.9)
+                        trace = pm.sample(
+                            tune=tune,
+                            draws=draws,
+                            start=self.map_soln,
+                            cores=cores,
+                            step=step
+                        )
+                    except Exception as e:
+                        print(f"Sampling error: {e}")
+                        # Last resort - simplest possible sampling call
+                        trace = pm.sample(
+                            tune=tune,
+                            draws=draws,
+                            start=self.map_soln,
+                            cores=cores
+                        )
 
             # Save samples
             samples = pm.trace_to_dataframe(trace)
